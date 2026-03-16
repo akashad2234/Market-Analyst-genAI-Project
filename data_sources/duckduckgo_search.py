@@ -92,11 +92,11 @@ def _cached_search(query: str, max_results: int) -> list[dict[str, Any]]:
 
 
 def _execute_search(query: str, max_results: int) -> list[dict[str, Any]]:
-    """Execute the DuckDuckGo news search with rate limiting."""
+    """Execute the DuckDuckGo news search with rate limiting and timeout."""
     _rate_limit()
 
     try:
-        with DDGS() as ddgs:
+        with DDGS(timeout=20) as ddgs:
             raw_results = list(ddgs.news(query, max_results=max_results))
 
         if not raw_results:
@@ -107,6 +107,8 @@ def _execute_search(query: str, max_results: int) -> list[dict[str, Any]]:
         logger.debug("Found {} news results for '{}'", len(results), query)
         return results
 
+    except DuckDuckGoSearchError:
+        raise
     except Exception as exc:
         logger.error("DuckDuckGo search failed for '{}': {}", query, exc)
         raise DuckDuckGoSearchError(f"Search failed for '{query}': {exc}") from exc
