@@ -1,0 +1,41 @@
+# Core API
+fastapi
+uvicorn[standard]
+
+# Frontend
+streamlit
+
+# Agent framework
+langgraph
+langchain
+langchain-core
+langchain-google-genai
+google-genai
+
+# Market data
+yfinance
+
+# Web search
+duckduckgo-search
+
+# Data processing
+pandas
+ta
+
+# Configuration
+python-dotenv
+pydantic
+pydantic-settings
+
+# Logging
+loguru
+
+# Testing
+pytest
+pytest-cov
+pytest-asyncio
+httpx
+
+# Linting & type checking
+ruff
+mypy
