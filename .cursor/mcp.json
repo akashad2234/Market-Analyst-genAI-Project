@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "market-analyst-db": {
+      "command": "python",
+      "args": ["-m", "mcp_servers.sqlite_server"],
+      "cwd": "d:\\Nextleap\\Market-Analyst-genAI-Project"
+    }
+  }
+}

@@ -36,5 +36,9 @@ dump.log
 .DS_Store
 Thumbs.db
 
+# Database
+data/
+*.db
+
 # Docker
 docker-compose.override.yml

@@ -36,6 +36,9 @@ pytest-cov
 pytest-asyncio
 httpx
 
+# MCP server
+mcp
+
 # Linting & type checking
 ruff
 mypy

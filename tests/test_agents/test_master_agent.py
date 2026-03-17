@@ -8,6 +8,9 @@ from agents.master_agent import (
     AnalysisResponse,
     QueryType,
     StockAnalysis,
+    _from_cache,
+    _generate_narrative,
+    _to_cacheable,
     analyze_query,
     parse_intent,
     run_analysis,
@@ -15,6 +18,19 @@ from agents.master_agent import (
 from agents.sentiment_agent import SentimentResult
 from agents.technical_agent import TechnicalResult
 from langgraph.graph_builder import AnalysisState
+from utils.database import close_all
+
+
+@pytest.fixture(autouse=True)
+def _clean_db():
+    """Ensure DB cache doesn't interfere between tests."""
+    import utils.database as db_mod
+
+    db_mod._db_path = ":memory:"
+    db_mod._connections.clear()
+    yield
+    close_all()
+    db_mod._db_path = None
 
 
 def _mock_state(
@@ -185,3 +201,178 @@ class TestAnalyzeQuery:
         resp = analyze_query("A.NS, B.NS, C.NS")
         assert resp.query_type == QueryType.PORTFOLIO
         assert len(resp.stocks) == 3
+
+
+class TestCacheHelpers:
+    def test_to_cacheable_extracts_scores(self):
+        sa = StockAnalysis(
+            ticker="RELIANCE.NS",
+            fundamental_score=75.0,
+            fundamental_verdict="Strong",
+            technical_score=60.0,
+            technical_verdict="Moderate",
+            sentiment_score=80.0,
+            sentiment_verdict="Positive",
+            final_score=70.0,
+            recommendation="Buy",
+            explanation="Full LLM narrative here",
+            errors={"sentiment": "timeout"},
+        )
+        cached = _to_cacheable(sa)
+        assert cached["ticker"] == "RELIANCE.NS"
+        assert cached["fundamental_score"] == 75.0
+        assert cached["recommendation"] == "Buy"
+        assert "explanation" not in cached
+
+    def test_from_cache_rebuilds_stock_analysis(self):
+        data = {
+            "ticker": "TCS.NS",
+            "fundamental_score": 70.0,
+            "fundamental_verdict": "Strong",
+            "technical_score": 55.0,
+            "technical_verdict": "Neutral",
+            "sentiment_score": 65.0,
+            "sentiment_verdict": "Moderate",
+            "final_score": 63.0,
+            "recommendation": "Buy",
+            "errors": {},
+        }
+        sa = _from_cache(data)
+        assert sa.ticker == "TCS.NS"
+        assert sa.fundamental_score == 70.0
+        assert sa.final_score == 63.0
+        assert sa.explanation == ""
+
+    def test_round_trip_preserves_data(self):
+        original = StockAnalysis(
+            ticker="INFY.NS",
+            fundamental_score=80.0,
+            fundamental_verdict="Very Strong",
+            technical_score=45.0,
+            technical_verdict="Bearish",
+            sentiment_score=60.0,
+            sentiment_verdict="Neutral",
+            final_score=62.0,
+            recommendation="Hold",
+        )
+        restored = _from_cache(_to_cacheable(original))
+        assert restored.ticker == original.ticker
+        assert restored.fundamental_score == original.fundamental_score
+        assert restored.final_score == original.final_score
+        assert restored.recommendation == original.recommendation
+
+
+class TestGenerateNarrative:
+    @patch("agents.master_agent.llm_generate")
+    def test_uses_llm_when_available(self, mock_llm):
+        mock_llm.return_value = "This is a fresh LLM narrative."
+        sa = StockAnalysis(
+            ticker="TCS.NS",
+            fundamental_score=70.0,
+            fundamental_verdict="Strong",
+            technical_score=60.0,
+            technical_verdict="Moderate",
+            sentiment_score=65.0,
+            sentiment_verdict="Positive",
+            final_score=65.0,
+            recommendation="Buy",
+        )
+        result = _generate_narrative(sa)
+        assert result == "This is a fresh LLM narrative."
+        mock_llm.assert_called_once()
+
+    @patch("agents.master_agent.llm_generate")
+    def test_falls_back_to_rule_text(self, mock_llm):
+        mock_llm.return_value = None
+        sa = StockAnalysis(
+            ticker="TCS.NS",
+            fundamental_score=70.0,
+            fundamental_verdict="Strong",
+            technical_score=60.0,
+            technical_verdict="Moderate",
+            sentiment_score=65.0,
+            sentiment_verdict="Positive",
+            final_score=65.0,
+            recommendation="Buy",
+        )
+        result = _generate_narrative(sa)
+        assert "Fundamental: Strong" in result
+        assert "Recommendation: Buy" in result
+
+    @patch("agents.master_agent.llm_generate")
+    def test_prompt_contains_ticker(self, mock_llm):
+        mock_llm.return_value = "narrative"
+        sa = StockAnalysis(ticker="RELIANCE.NS", final_score=70.0)
+        _generate_narrative(sa)
+        prompt_arg = mock_llm.call_args[0][0]
+        assert "RELIANCE.NS" in prompt_arg
+
+
+class TestCacheIntegration:
+    @patch("agents.master_agent.run_analysis_graph")
+    def test_cache_miss_calls_graph_and_stores(self, mock_graph):
+        mock_graph.return_value = _mock_state("RELIANCE.NS")
+        req = AnalysisRequest(query_type=QueryType.SINGLE_STOCK, tickers=["RELIANCE.NS"])
+        resp = run_analysis(req)
+
+        assert len(resp.stocks) == 1
+        mock_graph.assert_called_once()
+
+        from utils.cache import get_cached_analysis
+
+        cached = get_cached_analysis("RELIANCE.NS")
+        assert cached is not None
+        assert cached["ticker"] == "RELIANCE.NS"
+
+    @patch("agents.master_agent.llm_generate")
+    @patch("agents.master_agent.run_analysis_graph")
+    def test_cache_hit_skips_graph_calls_llm(self, mock_graph, mock_llm):
+        from utils.cache import set_cached_analysis
+
+        set_cached_analysis("RELIANCE.NS", {
+            "ticker": "RELIANCE.NS",
+            "fundamental_score": 75.0,
+            "fundamental_verdict": "Strong",
+            "technical_score": 70.0,
+            "technical_verdict": "Bullish",
+            "sentiment_score": 65.0,
+            "sentiment_verdict": "Positive",
+            "final_score": 71.0,
+            "recommendation": "Buy",
+            "errors": {},
+        })
+        mock_llm.return_value = "Fresh LLM narrative from cache hit"
+
+        req = AnalysisRequest(query_type=QueryType.SINGLE_STOCK, tickers=["RELIANCE.NS"])
+        resp = run_analysis(req)
+
+        mock_graph.assert_not_called()
+        mock_llm.assert_called_once()
+        assert resp.stocks[0].explanation == "Fresh LLM narrative from cache hit"
+        assert resp.stocks[0].fundamental_score == 75.0
+
+    @patch("agents.master_agent.llm_generate")
+    @patch("agents.master_agent.run_analysis_graph")
+    def test_cache_hit_with_llm_failure_uses_fallback(self, mock_graph, mock_llm):
+        from utils.cache import set_cached_analysis
+
+        set_cached_analysis("TCS.NS", {
+            "ticker": "TCS.NS",
+            "fundamental_score": 60.0,
+            "fundamental_verdict": "Moderate",
+            "technical_score": 55.0,
+            "technical_verdict": "Neutral",
+            "sentiment_score": 50.0,
+            "sentiment_verdict": "Neutral",
+            "final_score": 56.0,
+            "recommendation": "Hold",
+            "errors": {},
+        })
+        mock_llm.return_value = None
+
+        req = AnalysisRequest(query_type=QueryType.SINGLE_STOCK, tickers=["TCS.NS"])
+        resp = run_analysis(req)
+
+        mock_graph.assert_not_called()
+        assert "Fundamental: Moderate" in resp.stocks[0].explanation
+        assert "Recommendation: Hold" in resp.stocks[0].explanation

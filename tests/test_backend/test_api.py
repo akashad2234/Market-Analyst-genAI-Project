@@ -4,6 +4,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agents.master_agent import AnalysisResponse, QueryType, StockAnalysis
+from utils.database import close_all
+
+
+@pytest.fixture(autouse=True)
+def _clean_db():
+    import utils.database as db_mod
+
+    db_mod._db_path = ":memory:"
+    db_mod._connections.clear()
+    yield
+    close_all()
+    db_mod._db_path = None
 
 
 def _mock_stock(ticker: str, score: float = 72.0, rec: str = "Buy") -> StockAnalysis:

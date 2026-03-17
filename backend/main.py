@@ -7,6 +7,7 @@ from backend.routes.portfolio_routes import router as portfolio_router
 from backend.routes.stock_routes import router as stock_router
 from backend.schemas import HealthResponse
 from utils.config import CORS_ORIGINS
+from utils.database import cache_stats, history_get, purge_expired_cache
 from utils.logger import setup_logging
 from utils.metrics import metrics
 
@@ -44,6 +45,25 @@ def health_check() -> HealthResponse:
 def get_metrics() -> dict:
     logger.debug("Metrics endpoint called")
     return metrics.snapshot()
+
+
+@app.get("/history", tags=["Database"])
+def get_history(ticker: str | None = None, limit: int = 50) -> list[dict]:
+    """Retrieve past analysis results from the database."""
+    return history_get(ticker=ticker, limit=min(limit, 100))
+
+
+@app.get("/cache/stats", tags=["Database"])
+def get_cache_stats() -> dict:
+    """Get cache statistics: total entries, expired, by source."""
+    return cache_stats()
+
+
+@app.post("/cache/purge", tags=["Database"])
+def purge_cache() -> dict:
+    """Delete all expired cache entries."""
+    count = purge_expired_cache()
+    return {"purged": count}
 
 
 logger.info("AI Market Analyst API initialised")

@@ -302,3 +302,44 @@
   - [x] `tests/test_agents/test_sentiment_agent.py`: 4 LLM narrative tests (including headline verification).
   - [x] `tests/test_utils/test_config.py`: 4 tests for LLM_ENABLED (true/false/yes/1).
   - [x] Total: 322 tests passing, 0 lint errors, 0 type errors.
+
+---
+
+## Q. SQLite MCP Server & Caching Layer ✅
+
+- [x] Config: added `DB_PATH`, `CACHE_TTL_ANALYSIS` to `utils/config.py`.
+- [x] Updated `.gitignore` to exclude `data/` and `*.db` files.
+- [x] Added `mcp` to `requirements.txt`.
+- [x] Created `utils/database.py`:
+  - [x] Thread-safe connection manager with lazy initialization.
+  - [x] WAL journal mode + busy timeout for concurrent access.
+  - [x] Schema: `analysis_cache`, `analysis_history`, `metrics_snapshot` tables with indexes.
+  - [x] CRUD: `cache_get/set/clear/stats`, `history_save/get`, `metrics_save/latest`, `purge_expired_cache`.
+- [x] Created `utils/cache.py` (analysis-level, NOT data-source-level):
+  - [x] Single `get/set_cached_analysis` pair keyed by ticker.
+  - [x] Ticker case-insensitive (uppercased before cache key).
+  - [x] Single configurable TTL (`CACHE_TTL_ANALYSIS`, default 15 min).
+- [x] Cache integrated at `master_agent.py` level (after scoring, before LLM):
+  - [x] Cache key = just the ticker (simple).
+  - [x] Cached data = scores, verdicts, recommendation, errors (no explanation/narrative).
+  - [x] On cache hit: skip full pipeline (no Yahoo/DDG calls), call LLM for fresh narrative.
+  - [x] On cache miss: run full pipeline, cache the scores, return full response.
+  - [x] Guarantees at least 1 LLM call per request.
+- [x] Data sources (`yahoo_finance.py`, `duckduckgo_search.py`) are cache-free (clean API callers).
+- [x] Added `SUMMARY_ANALYSIS_PROMPT` to `utils/prompt_templates.py` for cache-hit narratives.
+- [x] Added analysis history saving to API routes:
+  - [x] `stock_routes.py`: saves after single-stock analysis.
+  - [x] `portfolio_routes.py`: saves per-stock after portfolio and comparison analysis.
+  - [x] Failures logged as warnings, never block the response.
+- [x] Added API endpoints: `GET /history`, `GET /cache/stats`, `POST /cache/purge`.
+- [x] Created `mcp_servers/sqlite_server.py` (FastMCP-based):
+  - [x] 12 tools: `get_cached_analysis`, `store_cached_analysis`, `clear_cache`, `get_cache_stats`, `purge_expired`, `get_analysis_history`, `save_analysis`, `save_metrics_snapshot`, `get_latest_metrics`, `list_tables`, `describe_table`, `run_read_query`.
+  - [x] Read-only SQL guard: only SELECT queries allowed via `run_read_query`.
+  - [x] Cursor MCP config: `.cursor/mcp.json`.
+- [x] Updated `.env.example` with database/cache config documentation.
+- [x] Tests (51 new, all mocked with in-memory SQLite):
+  - [x] `tests/test_utils/test_database.py`: 22 tests (connection, cache CRUD, history, metrics, purge).
+  - [x] `tests/test_utils/test_cache.py`: 6 tests (round-trip, case insensitive, overwrite, clear).
+  - [x] `tests/test_mcp_servers/test_sqlite_server.py`: 14 tests (all 12 tools + error cases).
+  - [x] `tests/test_agents/test_master_agent.py`: 9 new tests (cache helpers, narrative gen, cache integration).
+  - [x] Total: 382 tests passing, 0 lint errors.

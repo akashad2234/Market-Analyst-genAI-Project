@@ -16,6 +16,7 @@ from backend.schemas import (
     StockRiskProfileResponse,
 )
 from data_sources.yahoo_finance import normalize_ticker
+from utils.database import history_save
 
 router = APIRouter(tags=["Portfolio & Comparison"])
 
@@ -72,6 +73,21 @@ def portfolio_analysis(request: PortfolioAnalysisRequest) -> PortfolioAnalysisRe
             )
 
         logger.info("API: /portfolio_analysis complete for {} stocks", len(stock_responses))
+
+        try:
+            for sa in response.stocks:
+                history_save(
+                    ticker=sa.ticker,
+                    query_type="portfolio",
+                    fundamental_score=sa.fundamental_score,
+                    technical_score=sa.technical_score,
+                    sentiment_score=sa.sentiment_score,
+                    final_score=sa.final_score,
+                    recommendation=sa.recommendation,
+                )
+        except Exception as hist_exc:
+            logger.warning("Failed to save portfolio history: {}", hist_exc)
+
         return PortfolioAnalysisResponse(
             stocks=stock_responses,
             summary=response.summary,
@@ -99,6 +115,21 @@ def compare_stocks(request: CompareStocksRequest) -> CompareStocksResponse:
         stock_responses = [_to_stock_response(sa) for sa in response.stocks]
 
         logger.info("API: /compare_stocks complete: {} vs {}", tickers[0], tickers[1])
+
+        try:
+            for sa in response.stocks:
+                history_save(
+                    ticker=sa.ticker,
+                    query_type="comparison",
+                    fundamental_score=sa.fundamental_score,
+                    technical_score=sa.technical_score,
+                    sentiment_score=sa.sentiment_score,
+                    final_score=sa.final_score,
+                    recommendation=sa.recommendation,
+                )
+        except Exception as hist_exc:
+            logger.warning("Failed to save comparison history: {}", hist_exc)
+
         return CompareStocksResponse(stocks=stock_responses, summary=response.summary)
 
     except Exception as exc:

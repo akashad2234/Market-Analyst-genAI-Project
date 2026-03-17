@@ -8,11 +8,14 @@ from loguru import logger
 
 from data_sources.yahoo_finance import normalize_ticker
 from langgraph.graph_builder import AnalysisState, run_analysis_graph
+from utils.cache import get_cached_analysis, set_cached_analysis
+from utils.llm_client import generate as llm_generate
 from utils.portfolio_analyzer import (
     PortfolioInsight,
     _StockInput,
     analyze_portfolio,
 )
+from utils.prompt_templates import SUMMARY_ANALYSIS_PROMPT
 
 
 class QueryType(Enum):
@@ -189,6 +192,70 @@ def _run_portfolio_insight(stocks: list[StockAnalysis]) -> PortfolioInsight:
     return analyze_portfolio(inputs)
 
 
+def _to_cacheable(sa: StockAnalysis) -> dict:
+    """Extract the score/verdict fields worth caching (no explanation)."""
+    return {
+        "ticker": sa.ticker,
+        "fundamental_score": sa.fundamental_score,
+        "fundamental_verdict": sa.fundamental_verdict,
+        "technical_score": sa.technical_score,
+        "technical_verdict": sa.technical_verdict,
+        "sentiment_score": sa.sentiment_score,
+        "sentiment_verdict": sa.sentiment_verdict,
+        "final_score": sa.final_score,
+        "recommendation": sa.recommendation,
+        "errors": sa.errors,
+    }
+
+
+def _from_cache(data: dict) -> StockAnalysis:
+    """Rebuild a StockAnalysis from cached scores (explanation left empty)."""
+    return StockAnalysis(
+        ticker=data["ticker"],
+        fundamental_score=data.get("fundamental_score"),
+        fundamental_verdict=data.get("fundamental_verdict", ""),
+        technical_score=data.get("technical_score"),
+        technical_verdict=data.get("technical_verdict", ""),
+        sentiment_score=data.get("sentiment_score"),
+        sentiment_verdict=data.get("sentiment_verdict", ""),
+        final_score=data.get("final_score"),
+        recommendation=data.get("recommendation", ""),
+        errors=data.get("errors", {}),
+    )
+
+
+def _generate_narrative(sa: StockAnalysis) -> str:
+    """Call the LLM to produce a fresh narrative for cached scores."""
+    prompt = SUMMARY_ANALYSIS_PROMPT.format(
+        ticker=sa.ticker,
+        fundamental_score=sa.fundamental_score or "N/A",
+        fundamental_verdict=sa.fundamental_verdict or "N/A",
+        technical_score=sa.technical_score or "N/A",
+        technical_verdict=sa.technical_verdict or "N/A",
+        sentiment_score=sa.sentiment_score or "N/A",
+        sentiment_verdict=sa.sentiment_verdict or "N/A",
+        final_score=sa.final_score or "N/A",
+        recommendation=sa.recommendation or "N/A",
+    )
+    narrative = llm_generate(prompt)
+    if narrative:
+        logger.debug("LLM narrative generated for {} ({} chars)", sa.ticker, len(narrative))
+        return narrative
+
+    parts = []
+    if sa.fundamental_score is not None:
+        parts.append(f"Fundamental: {sa.fundamental_verdict} ({sa.fundamental_score:.1f})")
+    if sa.technical_score is not None:
+        parts.append(f"Technical: {sa.technical_verdict} ({sa.technical_score:.1f})")
+    if sa.sentiment_score is not None:
+        parts.append(f"Sentiment: {sa.sentiment_verdict} ({sa.sentiment_score:.1f})")
+    if sa.final_score is not None:
+        parts.append(f"Final Score: {sa.final_score:.1f}/100")
+    if sa.recommendation:
+        parts.append(f"Recommendation: {sa.recommendation}")
+    return " | ".join(parts)
+
+
 def run_analysis(request: AnalysisRequest) -> AnalysisResponse:
     """Execute analysis based on a parsed request. Main entry point for the master agent."""
     logger.info(
@@ -199,9 +266,18 @@ def run_analysis(request: AnalysisRequest) -> AnalysisResponse:
     stocks: list[StockAnalysis] = []
 
     for ticker in request.tickers:
+        cached = get_cached_analysis(ticker)
+        if cached is not None:
+            logger.info("Using cached analysis for {}, generating fresh narrative", ticker)
+            sa = _from_cache(cached)
+            sa.explanation = _generate_narrative(sa)
+            stocks.append(sa)
+            continue
+
         company_name = request.company_names.get(ticker)
         state = run_analysis_graph(ticker, company_name=company_name)
         sa = _state_to_stock_analysis(state)
+        set_cached_analysis(ticker, _to_cacheable(sa))
         stocks.append(sa)
 
     summary = _build_summary(request.query_type, stocks)

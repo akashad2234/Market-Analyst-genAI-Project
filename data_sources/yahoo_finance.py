@@ -165,6 +165,7 @@ def get_financials(ticker: str) -> dict[str, Any]:
             financials["debt_to_equity"],
             financials["return_on_equity"],
         )
+
         return financials
 
     except YahooFinanceError:

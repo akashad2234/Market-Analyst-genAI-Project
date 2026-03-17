@@ -53,3 +53,20 @@ Neutral articles: {neutral_count}
 Focus on: the dominant narrative in the market, any catalysts or risks, and \
 overall investor sentiment direction. Do not use em dashes.\
 """
+
+SUMMARY_ANALYSIS_PROMPT = """\
+You are a senior equity research analyst. Given the following analysis scores \
+for {ticker}, write a concise investment summary (4-6 sentences) that a \
+portfolio manager can act on.
+
+Analysis Results:
+- Fundamental Score: {fundamental_score}/100 ({fundamental_verdict})
+- Technical Score: {technical_score}/100 ({technical_verdict})
+- Sentiment Score: {sentiment_score}/100 ({sentiment_verdict})
+- Final Weighted Score: {final_score}/100
+- Recommendation: {recommendation}
+
+Synthesise the three dimensions into a coherent narrative. Explain where the \
+stock is strong or weak, and what the recommendation means in practical terms. \
+Do not use em dashes.\
+"""

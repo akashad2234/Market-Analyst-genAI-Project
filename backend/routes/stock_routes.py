@@ -12,6 +12,7 @@ from backend.schemas import (
     StockAnalysisResponse,
 )
 from data_sources.yahoo_finance import normalize_ticker
+from utils.database import history_save
 
 router = APIRouter(tags=["Stock Analysis"])
 
@@ -51,6 +52,20 @@ def analyze_stock(request: AnalyzeStockRequest) -> AnalyzeStockResponse:
             "API: /analyze_stock response for {}: score={}, rec={}",
             sa.ticker, sa.final_score, sa.recommendation,
         )
+
+        try:
+            history_save(
+                ticker=sa.ticker,
+                query_type="single_stock",
+                fundamental_score=sa.fundamental_score,
+                technical_score=sa.technical_score,
+                sentiment_score=sa.sentiment_score,
+                final_score=sa.final_score,
+                recommendation=sa.recommendation,
+            )
+        except Exception as hist_exc:
+            logger.warning("Failed to save analysis history: {}", hist_exc)
+
         return AnalyzeStockResponse(stock=stock_resp, summary=response.summary)
 
     except HTTPException:

@@ -93,6 +93,12 @@ API_PORT: int = int(_get_optional("API_PORT", "8000"))
 CORS_ORIGINS: list[str] = _get_optional("CORS_ORIGINS", "*").split(",")
 
 # ---------------------------------------------------------------------------
+# Database / Cache
+# ---------------------------------------------------------------------------
+DB_PATH: str = _get_optional("DB_PATH", str(_PROJECT_ROOT / "data" / "market_analyst.db"))
+CACHE_TTL_ANALYSIS: int = int(_get_optional("CACHE_TTL_ANALYSIS", "900"))
+
+# ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 LOG_LEVEL: str = _get_optional("LOG_LEVEL", "INFO")
