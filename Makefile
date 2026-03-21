@@ -22,6 +22,9 @@ dev-api:
 dev-ui:
 	streamlit run ui/streamlit_app.py
 
+dev-ui-standalone:
+	streamlit run app.py
+
 react-dev:
 	cd react-ui && npm run dev
 
