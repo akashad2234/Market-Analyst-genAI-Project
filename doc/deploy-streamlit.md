@@ -22,7 +22,7 @@ git push origin main
 2. Sign in with your GitHub account
 3. Click **"New app"**
 4. Select your repository: `akashad2234/Market-Analyst-genAI-Project`
-5. Set **Main file path**: `app.py`
+5. Set **Main file path**: `streamlit_app.py`
 6. Set **Branch**: `main`
 7. Click **"Deploy!"**
 
@@ -57,8 +57,9 @@ https://<your-app-name>.streamlit.app
 
 | File | Purpose |
 |------|---------|
-| `app.py` | Standalone Streamlit app (deploy this) |
-| `ui/streamlit_app.py` | Streamlit app that calls FastAPI (for local dev) |
+| `streamlit_app.py` | Standalone Streamlit app (deploy this on Streamlit Cloud) |
+| `app.py` | Same as streamlit_app.py (alternative entry point) |
+| `ui/streamlit_app.py` | Streamlit app that calls FastAPI (for local dev with API) |
 | `requirements.txt` | Python dependencies (used by Streamlit Cloud) |
 | `.streamlit/config.toml` | Streamlit server config |
 
@@ -67,7 +68,7 @@ https://<your-app-name>.streamlit.app
 To run the standalone app locally:
 
 ```bash
-streamlit run app.py
+streamlit run streamlit_app.py
 ```
 
 Or with the Makefile:
