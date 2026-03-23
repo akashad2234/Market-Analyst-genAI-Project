@@ -8,11 +8,19 @@ from duckduckgo_search import DDGS
 from loguru import logger
 
 try:
-    from utils.config import DDG_CACHE_SIZE, DDG_MAX_RESULTS, DDG_RATE_LIMIT_SECONDS
+    from utils.config import (
+        DDG_CACHE_SIZE,
+        DDG_MAX_RESULTS,
+        DDG_RATE_LIMIT_SECONDS,
+        DDG_RETRY_ATTEMPTS,
+        DDG_TIMEOUT,
+    )
 except Exception:
     DDG_MAX_RESULTS = 10
     DDG_CACHE_SIZE = 128
-    DDG_RATE_LIMIT_SECONDS = 1.5
+    DDG_RATE_LIMIT_SECONDS = 2.0
+    DDG_TIMEOUT = 30
+    DDG_RETRY_ATTEMPTS = 2
 
 _MIN_REQUEST_INTERVAL_SECONDS: float = DDG_RATE_LIMIT_SECONDS
 _last_request_time: float = 0.0
@@ -92,26 +100,39 @@ def _cached_search(query: str, max_results: int) -> list[dict[str, Any]]:
 
 
 def _execute_search(query: str, max_results: int) -> list[dict[str, Any]]:
-    """Execute the DuckDuckGo news search with rate limiting and timeout."""
+    """Execute the DuckDuckGo news search with rate limiting, timeout, and retry."""
     _rate_limit()
 
-    try:
-        with DDGS(timeout=20) as ddgs:
-            raw_results = list(ddgs.news(query, max_results=max_results))
+    last_exc = None
+    for attempt in range(DDG_RETRY_ATTEMPTS):
+        try:
+            with DDGS(timeout=DDG_TIMEOUT) as ddgs:
+                raw_results = list(ddgs.news(query, max_results=max_results))
 
-        if not raw_results:
-            logger.warning("No news results found for query: '{}'", query)
-            return []
+            if not raw_results:
+                logger.warning("No news results found for query: '{}'", query)
+                return []
 
-        results = [_normalize_result(r) for r in raw_results]
-        logger.debug("Found {} news results for '{}'", len(results), query)
-        return results
+            results = [_normalize_result(r) for r in raw_results]
+            logger.debug("Found {} news results for '{}'", len(results), query)
+            return results
 
-    except DuckDuckGoSearchError:
-        raise
-    except Exception as exc:
-        logger.error("DuckDuckGo search failed for '{}': {}", query, exc)
-        raise DuckDuckGoSearchError(f"Search failed for '{query}': {exc}") from exc
+        except DuckDuckGoSearchError:
+            raise
+        except Exception as exc:
+            last_exc = exc
+            if attempt < DDG_RETRY_ATTEMPTS - 1:
+                wait = 2.0 * (attempt + 1)
+                logger.warning(
+                    "DuckDuckGo search failed for '{}' (attempt {}/{}), retrying in {:.1f}s: {}",
+                    query, attempt + 1, DDG_RETRY_ATTEMPTS, wait, exc,
+                )
+                time.sleep(wait)
+            else:
+                logger.error("DuckDuckGo search failed for '{}': {}", query, exc)
+                raise DuckDuckGoSearchError(f"Search failed for '{query}': {exc}") from exc
+
+    raise DuckDuckGoSearchError(f"Search failed for '{query}': {last_exc}") from last_exc
 
 
 def clear_cache() -> None:

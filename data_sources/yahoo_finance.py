@@ -1,21 +1,64 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 import pandas as pd
 import yfinance as yf
 from loguru import logger
 
 try:
-    from utils.config import YAHOO_HISTORY_INTERVAL, YAHOO_HISTORY_PERIOD_DAYS
+    from utils.config import (
+        YAHOO_HISTORY_INTERVAL,
+        YAHOO_HISTORY_PERIOD_DAYS,
+        YAHOO_RETRY_ATTEMPTS,
+        YAHOO_RETRY_DELAY_BASE,
+    )
 except Exception:
     YAHOO_HISTORY_PERIOD_DAYS = 365
     YAHOO_HISTORY_INTERVAL = "1d"
+    YAHOO_RETRY_ATTEMPTS = 3
+    YAHOO_RETRY_DELAY_BASE = 2.0
 
 
 class YahooFinanceError(Exception):
     """Raised when Yahoo Finance data retrieval fails."""
+
+
+T = TypeVar("T")
+
+
+def _is_rate_limit_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return (
+        "too many requests" in msg
+        or "rate limit" in msg
+        or "rate limited" in msg
+        or "429" in msg
+    )
+
+
+def _with_retry(fn: Callable[[], T], ticker: str, operation: str) -> T:
+    """Retry Yahoo Finance calls on rate limit with exponential backoff."""
+    last_exc = None
+    for attempt in range(YAHOO_RETRY_ATTEMPTS):
+        try:
+            return fn()
+        except YahooFinanceError:
+            raise
+        except Exception as exc:
+            last_exc = exc
+            if attempt < YAHOO_RETRY_ATTEMPTS - 1 and _is_rate_limit_error(exc):
+                wait = YAHOO_RETRY_DELAY_BASE * (2**attempt)
+                logger.warning(
+                    "Rate limited on {} ({}), retrying in {:.1f}s (attempt {}/{})",
+                    ticker, operation, wait, attempt + 1, YAHOO_RETRY_ATTEMPTS,
+                )
+                time.sleep(wait)
+            else:
+                raise
+    raise last_exc  # type: ignore[misc]
 
 
 def normalize_ticker(ticker: str) -> str:
@@ -46,14 +89,14 @@ def get_quote(ticker: str) -> dict[str, Any]:
     ticker = _validate_ticker(ticker)
     logger.info("Fetching quote for {}", ticker)
 
-    try:
+    def _fetch() -> dict[str, Any]:
         stock = yf.Ticker(ticker)
         info = stock.info
 
         if not info or info.get("regularMarketPrice") is None:
             raise YahooFinanceError(f"No data returned for ticker '{ticker}'. It may be invalid.")
 
-        quote = {
+        return {
             "ticker": ticker,
             "name": info.get("shortName") or info.get("longName", ""),
             "sector": info.get("sector", ""),
@@ -64,9 +107,11 @@ def get_quote(ticker: str) -> dict[str, Any]:
             "currency": info.get("currency", "INR"),
             "exchange": info.get("exchange", ""),
         }
+
+    try:
+        quote = _with_retry(_fetch, ticker, "quote")
         logger.debug("Quote for {}: price={}, cap={}", ticker, quote["current_price"], quote["market_cap"])
         return quote
-
     except YahooFinanceError:
         raise
     except Exception as exc:
@@ -96,10 +141,9 @@ def get_historical(
     ticker = _validate_ticker(ticker)
     logger.info("Fetching {} days of historical data for {} (interval={})", period_days, ticker, interval)
 
-    try:
+    def _fetch() -> pd.DataFrame:
         end = datetime.now()
         start = end - timedelta(days=period_days)
-
         stock = yf.Ticker(ticker)
         df = stock.history(start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"), interval=interval)
 
@@ -108,14 +152,15 @@ def get_historical(
 
         df = df.reset_index()
         keep_cols = [c for c in ["Date", "Open", "High", "Low", "Close", "Volume"] if c in df.columns]
-        df = df[keep_cols]
+        return df[keep_cols].copy()
 
+    try:
+        df = _with_retry(_fetch, ticker, "historical")
         logger.debug(
             "Historical data for {}: {} rows, range {} to {}",
             ticker, len(df), df["Date"].iloc[0], df["Date"].iloc[-1],
         )
         return df
-
     except YahooFinanceError:
         raise
     except Exception as exc:
@@ -134,14 +179,14 @@ def get_financials(ticker: str) -> dict[str, Any]:
     ticker = _validate_ticker(ticker)
     logger.info("Fetching financials for {}", ticker)
 
-    try:
+    def _fetch() -> dict[str, Any]:
         stock = yf.Ticker(ticker)
         info = stock.info
 
         if not info:
             raise YahooFinanceError(f"No financial data returned for '{ticker}'.")
 
-        financials = {
+        return {
             "ticker": ticker,
             "pe_ratio": info.get("trailingPE"),
             "forward_pe": info.get("forwardPE"),
@@ -158,6 +203,8 @@ def get_financials(ticker: str) -> dict[str, Any]:
             "fifty_two_week_low": info.get("fiftyTwoWeekLow"),
         }
 
+    try:
+        financials = _with_retry(_fetch, ticker, "financials")
         logger.debug(
             "Financials for {}: PE={}, D/E={}, ROE={}",
             ticker,
@@ -165,9 +212,7 @@ def get_financials(ticker: str) -> dict[str, Any]:
             financials["debt_to_equity"],
             financials["return_on_equity"],
         )
-
         return financials
-
     except YahooFinanceError:
         raise
     except Exception as exc:

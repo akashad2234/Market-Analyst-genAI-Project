@@ -77,13 +77,24 @@ SCORING_THRESHOLDS: list[tuple[float, str]] = [
 # ---------------------------------------------------------------------------
 YAHOO_HISTORY_PERIOD_DAYS: int = int(_get_optional("YAHOO_HISTORY_PERIOD_DAYS", "365"))
 YAHOO_HISTORY_INTERVAL: str = _get_optional("YAHOO_HISTORY_INTERVAL", "1d")
+YAHOO_RETRY_ATTEMPTS: int = int(_get_optional("YAHOO_RETRY_ATTEMPTS", "3"))
+YAHOO_RETRY_DELAY_BASE: float = float(_get_optional("YAHOO_RETRY_DELAY_BASE", "2.0"))
 
 # ---------------------------------------------------------------------------
 # Data source: DuckDuckGo
 # ---------------------------------------------------------------------------
 DDG_MAX_RESULTS: int = int(_get_optional("DDG_MAX_RESULTS", "10"))
-DDG_RATE_LIMIT_SECONDS: float = float(_get_optional("DDG_RATE_LIMIT_SECONDS", "1.5"))
+DDG_RATE_LIMIT_SECONDS: float = float(_get_optional("DDG_RATE_LIMIT_SECONDS", "2.0"))
 DDG_CACHE_SIZE: int = int(_get_optional("DDG_CACHE_SIZE", "128"))
+DDG_TIMEOUT: int = int(_get_optional("DDG_TIMEOUT", "30"))
+DDG_RETRY_ATTEMPTS: int = int(_get_optional("DDG_RETRY_ATTEMPTS", "2"))
+
+# ---------------------------------------------------------------------------
+# Rate limiting: delay between analyzing multiple tickers (portfolio/comparison)
+# ---------------------------------------------------------------------------
+DELAY_BETWEEN_TICKERS_SECONDS: float = float(
+    _get_optional("DELAY_BETWEEN_TICKERS_SECONDS", "3.0")
+)
 
 # ---------------------------------------------------------------------------
 # Server

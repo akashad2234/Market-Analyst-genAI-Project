@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -9,6 +10,7 @@ from loguru import logger
 from data_sources.yahoo_finance import normalize_ticker
 from langgraph.graph_builder import AnalysisState, run_analysis_graph
 from utils.cache import get_cached_analysis, set_cached_analysis
+from utils.config import DELAY_BETWEEN_TICKERS_SECONDS
 from utils.llm_client import generate as llm_generate
 from utils.portfolio_analyzer import (
     PortfolioInsight,
@@ -265,7 +267,11 @@ def run_analysis(request: AnalysisRequest) -> AnalysisResponse:
 
     stocks: list[StockAnalysis] = []
 
-    for ticker in request.tickers:
+    for i, ticker in enumerate(request.tickers):
+        if i > 0 and DELAY_BETWEEN_TICKERS_SECONDS > 0:
+            logger.debug("Waiting {:.1f}s before next ticker to avoid rate limits", DELAY_BETWEEN_TICKERS_SECONDS)
+            time.sleep(DELAY_BETWEEN_TICKERS_SECONDS)
+
         cached = get_cached_analysis(ticker)
         if cached is not None:
             logger.info("Using cached analysis for {}, generating fresh narrative", ticker)
